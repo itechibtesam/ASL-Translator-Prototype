@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ASL Translator Prototype - Final Mobile Fix: Voice Loading</title>
+    <title>ASL Translator Prototype - Final Code</title>
     
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
@@ -84,7 +84,7 @@
             margin-bottom: 8px;
         }
         
-        /* Status Section Styling */
+        /* 3. Status Indicators */
         .status-line {
             display: flex;
             justify-content: space-between;
@@ -93,7 +93,6 @@
             font-weight: 400;
         }
 
-        /* 3. Status Indicators */
         .status { 
             color: #FFC107; 
             font-weight: 600;
@@ -167,8 +166,8 @@
         <div class="instructions-heading">Operation Instructions:</div>
         <ul>
             <li>Open Hand: System starts the listening process.</li>
-            <li>Hold Sign: System attempts to stabilize and recognize the sign.</li>
-            <li>Pinch/Close: Confirms the recognized sign and speaks the translation.</li>
+            <li>**Hold Sign for 1 Second:** Automatically confirms the sign and speaks the translation.</li>
+            <li>No additional pinch/close gesture is required.</li>
         </ul>
 
         <div class="status-line">
@@ -189,8 +188,10 @@
         const PARTICLE_COUNT = 5000;
         const CAM_WIDTH = 640;
         const CAM_HEIGHT = 480;
-        const RECOGNITION_HOLD_TIME = 800; // ms
-        const CONFIRM_GESTURE_THRESHOLD = 0.05;
+        // Recognition holds for 800ms before becoming 'recognized'
+        const STABILITY_HOLD_TIME = 800; 
+        // Speak trigger happens after recognized sign is stable for an additional 1000ms 
+        const SPEAK_CONFIRM_TIME = 1000; 
 
         // Landmark indices for geometry checks
         const L_THUMB_TIP = 4;
@@ -202,11 +203,11 @@
         // --- GLOBAL STATE ---
         let handLandmarks = null;
         let isHandPresent = false;
-        let pinchDistance = 1.0;
         let recognizedSign = 'Unclear';
         let lastStableSign = 'Unclear';
         let confidenceLevel = 0.0;
-        let recognitionTimer = null;
+        let stabilityTimer = null;
+        let speakTimer = null; // New timer for the 1-second delay before speaking
         let isSpeaking = false;
         let currentShapeTarget = 'sphere'; 
         
@@ -215,7 +216,7 @@
         let availableVoices = [];
         let maleVoiceData = null; 
         let femaleVoiceData = null; 
-        let voiceRetryInterval = null; // New variable for the retry loop
+        let voiceRetryInterval = null; 
 
 
         // --- DOM Elements ---
@@ -225,21 +226,13 @@
         const voiceSelect = document.getElementById('voice-select');
 
 
-        // --- VOICE SETUP ---
+        // --- VOICE SETUP (UNCHANGED) ---
         const synth = window.speechSynthesis;
         let lastSpokenText = '';
 
-        /**
-         * Finds a distinct English voice prioritizing common male/female names. (UNCHANGED)
-         */
         function findVoice(voices, gender, excludeVoiceName = null) {
-            const enVoices = voices.filter(v => 
-                v.lang.startsWith('en') && 
-                v.name !== excludeVoiceName
-            );
-            
+            const enVoices = voices.filter(v => v.lang.startsWith('en') && v.name !== excludeVoiceName);
             const lowQualityKeywords = ['compact', 'chrome', 'eloquence'];
-            
             const genderKeywords = gender === 'male' 
                 ? ['male', 'mark', 'daniel', 'david', 'lee', 'zack', 'scott'] 
                 : ['female', 'samantha', 'serena', 'zira', 'fiona', 'tara', 'ava', 'woman'];
@@ -252,28 +245,21 @@
             if (!voice) {
                 voice = enVoices.find(v => genderKeywords.some(key => v.name.toLowerCase().includes(key)));
             }
-            
             if (!voice && enVoices.length > 0) {
                  voice = enVoices[0];
             }
-
             return voice;
         }
 
-        /**
-         * Populates the voice list and sets up the retry logic.
-         */
         function populateVoiceList() {
             availableVoices = synth.getVoices();
             
-            // If voices are available, proceed and clear the retry interval
             if (availableVoices.length > 0) {
                  if (voiceRetryInterval) {
                      clearInterval(voiceRetryInterval);
                      voiceRetryInterval = null;
                  }
             } else {
-                // If no voices yet, return and let the retry loop handle it
                 return; 
             }
 
@@ -282,29 +268,17 @@
             maleVoiceData = findVoice(availableVoices, 'male');
             femaleVoiceData = findVoice(availableVoices, 'female', maleVoiceData ? maleVoiceData.name : null);
 
-            // Fallback logic for unique voices (UNCHANGED)
-            if (!maleVoiceData && availableVoices.filter(v => v.lang.startsWith('en')).length >= 1) {
-                maleVoiceData = availableVoices.filter(v => v.lang.startsWith('en'))[0];
-            }
-            if (!femaleVoiceData && maleVoiceData) {
-                femaleVoiceData = availableVoices.filter(v => v.lang.startsWith('en') && v.name !== maleVoiceData.name)[0];
-            }
-
-
             if (!maleVoiceData) {
                  voiceSelect.innerHTML = '<option value="default" disabled>No English Voices Found</option>';
                  return;
             }
 
-            // --- 1. Add Male Voice Option ---
             const maleOption = document.createElement('option');
             maleOption.value = maleVoiceData.name; 
             maleOption.textContent = `Male Voice: ${maleVoiceData.name}`;
             voiceSelect.appendChild(maleOption);
-            
             selectedVoice = maleVoiceData;
 
-            // --- 2. Add Female Voice Option ---
             if (femaleVoiceData && femaleVoiceData.name !== maleVoiceData.name) {
                 const femaleOption = document.createElement('option');
                 femaleOption.value = femaleVoiceData.name;
@@ -320,15 +294,10 @@
             voiceSelect.value = selectedVoice.name;
         }
 
-        // --- VOICE INITIALIZATION (ROBUST RETRY) ---
-
-        // 1. Listen for the official event (best case)
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = populateVoiceList;
         } 
         
-        // 2. Start the aggressive retry loop (mobile fix)
-        // This repeatedly calls populateVoiceList until it finds voices.
         if (synth.getVoices().length === 0) {
             voiceRetryInterval = setInterval(populateVoiceList, 500);
         }
@@ -354,7 +323,7 @@
             synth.speak(utterThis);
         }
 
-        // --- ALL OTHER LOGIC (UNCHANGED) ---
+        // --- GEOMETRY UTILITIES (UNCHANGED) ---
 
         function distance(lm1, lm2) {
             return Math.sqrt(
@@ -370,6 +339,8 @@
             return tip.y < mcp.y - 0.05;
         }
 
+        // --- SIGN RECOGNITION LOGIC (UNCHANGED) ---
+
         function getSignFromLandmarks(landmarks) {
             const isThumbOpen = isFingerExtended(landmarks, L_THUMB_TIP);
             const isIndexOpen = isFingerExtended(landmarks, L_INDEX_TIP);
@@ -377,24 +348,28 @@
             const isRingOpen = isFingerExtended(landmarks, L_RING_TIP);
             const isPinkyOpen = isFingerExtended(landmarks, L_PINKY_TIP);
             
+            // 1. Hello (Open Hand)
             if (isThumbOpen && isIndexOpen && isMiddleOpen && isRingOpen && isPinkyOpen) {
                 confidenceLevel = 0.9;
                 currentShapeTarget = 'sphere';
                 return 'Hello';
             }
 
+            // 2. I Love You (ILY - Index, Pinky, Thumb extended)
             if (isIndexOpen && isPinkyOpen && isThumbOpen && !isMiddleOpen && !isRingOpen) {
                 confidenceLevel = 0.8;
                 currentShapeTarget = 'heart';
                 return 'I Love You ';
             }
             
+            // 3. No / Fist (All fingers curled)
             if (!isThumbOpen && !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
                 confidenceLevel = 0.7;
                 currentShapeTarget = 'small_sphere';
                 return 'No';
             }
 
+            // 4. Index Finger (Request/Help - Index extended only)
             if (isIndexOpen && !isThumbOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
                 confidenceLevel = 0.85;
                 currentShapeTarget = 'saturn';
@@ -406,46 +381,66 @@
             return 'Unclear';
         }
 
+        // --- MEDIAPIPE HANDLER (MODIFIED FOR TIME-BASED CONFIRMATION) ---
+
         function onResults(results) {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 handLandmarks = results.multiHandLandmarks[0];
                 isHandPresent = true;
                 
                 const newSign = getSignFromLandmarks(handLandmarks);
-                const pinchDistance = distance(handLandmarks[L_INDEX_TIP], handLandmarks[L_THUMB_TIP]);
-
+                
+                // 1. STABILITY CHECK: Is the sign new or stable?
                 if (newSign !== 'Unclear' && newSign === lastStableSign) {
-                    if (!recognitionTimer) {
-                        recognitionTimer = setTimeout(() => {
+                    if (!stabilityTimer) {
+                        // Start timer to make sign 'recognized' after STABILITY_HOLD_TIME
+                        stabilityTimer = setTimeout(() => {
                             recognizedSign = newSign;
                             signEl.innerText = recognizedSign;
                             signEl.className = 'recognized';
-                        }, RECOGNITION_HOLD_TIME);
+                            
+                            // 2. SPEAKING CHECK: If recognized, start timer to speak after SPEAK_CONFIRM_TIME
+                            if (!speakTimer && !isSpeaking) {
+                                speakTimer = setTimeout(() => {
+                                    outputEl.innerText = `Speaking: ${recognizedSign}...`;
+                                    speak(recognizedSign);
+                                    
+                                    // Reset after speaking
+                                    recognizedSign = 'Unclear';
+                                    lastStableSign = 'Unclear';
+                                    signEl.innerText = 'Spoken';
+                                    speakTimer = null; 
+                                }, SPEAK_CONFIRM_TIME);
+                            }
+
+                        }, STABILITY_HOLD_TIME);
                     }
                 } else {
-                    clearTimeout(recognitionTimer);
-                    recognitionTimer = null;
+                    // Sign changed or became unclear: Reset both timers
+                    clearTimeout(stabilityTimer);
+                    clearTimeout(speakTimer);
+                    stabilityTimer = null;
+                    speakTimer = null;
+                    
                     lastStableSign = newSign;
-                    if (recognizedSign === 'Unclear') {
+                    recognizedSign = 'Unclear';
+
+                    if (!isSpeaking) {
                         signEl.innerText = newSign;
                         signEl.className = newSign === 'Unclear' ? 'unclear' : 'status';
                     }
-                }
-                
-                if (recognizedSign !== 'Unclear' && pinchDistance < CONFIRM_GESTURE_THRESHOLD && !isSpeaking) {
-                    outputEl.innerText = `Speaking: ${recognizedSign}...`;
-                    speak(recognizedSign);
-                    recognizedSign = 'Unclear';
-                    lastStableSign = 'Unclear';
-                    signEl.innerText = 'Confirmed';
                 }
 
                 statusEl.innerText = 'Listening & Tracking';
                 statusEl.className = 'recognized';
 
             } else {
-                clearTimeout(recognitionTimer);
-                recognitionTimer = null;
+                // Hand disappeared: Reset all states and timers
+                clearTimeout(stabilityTimer);
+                clearTimeout(speakTimer);
+                stabilityTimer = null;
+                speakTimer = null;
+
                 isHandPresent = false;
                 recognizedSign = 'Unclear';
                 lastStableSign = 'Unclear';
@@ -457,7 +452,7 @@
             }
         }
 
-        // --- MEDIAPIPE & CAMERA SETUP (UNCHANGED from last robust version) ---
+        // --- MEDIAPIPE & CAMERA SETUP (UNCHANGED) ---
 
         const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
         hands.setOptions({ 
@@ -623,7 +618,8 @@
                 targetR = 1.0 - confidenceLevel;
                 targetG = confidenceLevel;
                 targetB = 0.2 + confidenceLevel * 0.8;
-                expansionFactor = THREE.MathUtils.mapLinear(pinchDistance, 0.0, 1.0, 1.0, 1.5);
+                // No pinch check needed here, just animate based on presence/confidence
+                expansionFactor = 1.2; 
                 morphSpeed = 0.1;
             } else {
                 targetR = targetG = targetB = 0.1;
