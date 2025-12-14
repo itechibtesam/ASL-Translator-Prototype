@@ -2,28 +2,44 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ASL Translator Prototype - Explicit Voice Gender Fix</title>
+    <title>ASL Translator Prototype - Mobile Ready</title>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     
     <style>
-        /* 1. Global & Background */
+        /* 1. Global & Background (Updated for Mobile Viewport) */
         body {
             margin: 0;
             overflow: hidden;
             background: #000000;
             font-family: 'Poppins', sans-serif;
             color: #E0E0E0;
+            /* Ensures full coverage on mobile */
+            width: 100vw; 
+            height: 100vh;
         }
         video { display: none; }
+        
+        /* Ensures the canvas takes up the full screen */
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
 
-        /* 2. GUI Panel (Centralized Frosted Glass) */
+        /* 2. GUI Panel (Centralized Frosted Glass - Adjusted for smaller screens) */
         #gui {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 400px; 
+            width: 90%; /* Use percentage for mobile responsiveness */
+            max-width: 400px; /* Max width constraint */
             z-index: 100;
             padding: 30px;
             border-radius: 20px; 
@@ -32,11 +48,17 @@
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); 
             backdrop-filter: blur(10px); 
             -webkit-backdrop-filter: blur(10px);
-            pointer-events: none;
+            /* Allows touch events to pass through to elements like the dropdown, but not the background */
+            pointer-events: none; 
+        }
+        
+        /* Ensure all interactive elements inside GUI are tappable */
+        #voice-selector-container, #voice-select {
+            pointer-events: auto; 
         }
 
         h3 {
-            font-size: 1.8em;
+            font-size: 1.6em; /* Slightly smaller for mobile */
             font-weight: 700; 
             color: #4CAF50;
             margin-top: 0;
@@ -91,7 +113,7 @@
 
         /* 4. Primary Output Text */
         #output-text {
-            font-size: 2.2em; 
+            font-size: 1.8em; /* Slightly smaller for mobile */
             font-weight: 700;
             color: #00FFFF;
             text-align: center;
@@ -108,7 +130,6 @@
             margin-bottom: 20px;
             padding-top: 10px;
             border-top: 1px solid rgba(255, 255, 255, 0.1);
-            pointer-events: auto; 
         }
 
         #voice-select {
@@ -247,7 +268,7 @@
 
         function populateVoiceList() {
             availableVoices = synth.getVoices();
-            voiceSelect.innerHTML = ''; // Clear loading message
+            voiceSelect.innerHTML = ''; 
 
             // 1. Find the best Male voice
             maleVoiceData = findVoice(availableVoices, 'male');
@@ -300,13 +321,11 @@
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = populateVoiceList;
         } else {
-            // Check immediately for systems where voices load fast (like Firefox)
             populateVoiceList(); 
         }
 
         voiceSelect.addEventListener('change', () => {
             const voiceName = voiceSelect.value;
-            // Find the voice object by name from the global available voices list
             selectedVoice = availableVoices.find(v => v.name === voiceName);
         });
 
@@ -442,9 +461,14 @@
         hands.onResults(onResults);
 
         const videoElement = document.getElementById('input_video');
+        
+        // --- MOBILE-READY CAMERA SETUP ---
         const cameraUtils = new Camera(videoElement, {
             onFrame: async () => { await hands.send({image: videoElement}); },
-            width: CAM_WIDTH, height: CAM_HEIGHT
+            width: CAM_WIDTH, 
+            height: CAM_HEIGHT,
+            // Use environment camera on mobile by default
+            facingMode: 'user' 
         });
         cameraUtils.start();
 
@@ -506,7 +530,7 @@
         const particles = new THREE.Points(geometry, material);
         scene.add(particles);
 
-        // --- SHAPE GENERATORS ---
+        // --- SHAPE GENERATORS (UNCHANGED) ---
         function setTargetShape(shapeType) {
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 const idx = i * 3;
@@ -558,7 +582,7 @@
         }
         setTargetShape(currentShapeTarget);
 
-        // --- ANIMATION LOOP ---
+        // --- ANIMATION LOOP (UNCHANGED) ---
         const clock = new THREE.Clock();
         let lastShape = currentShapeTarget;
 
@@ -624,6 +648,7 @@
 
         animate();
 
+        // --- MOBILE-FRIENDLY RESIZE HANDLER ---
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
