@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ASL Translator Prototype - Final Code</title>
+    <title>ASL Translator Prototype - Final Production Code</title>
     
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
@@ -188,9 +188,7 @@
         const PARTICLE_COUNT = 5000;
         const CAM_WIDTH = 640;
         const CAM_HEIGHT = 480;
-        // Recognition holds for 800ms before becoming 'recognized'
         const STABILITY_HOLD_TIME = 800; 
-        // Speak trigger happens after recognized sign is stable for an additional 1000ms 
         const SPEAK_CONFIRM_TIME = 1000; 
 
         // Landmark indices for geometry checks
@@ -207,15 +205,15 @@
         let lastStableSign = 'Unclear';
         let confidenceLevel = 0.0;
         let stabilityTimer = null;
-        let speakTimer = null; // New timer for the 1-second delay before speaking
+        let speakTimer = null; 
         let isSpeaking = false;
         let currentShapeTarget = 'sphere'; 
         
         // --- VOICE STATE ---
-        let selectedVoice = null;
+        let selectedVoiceName = null; // Store the selected string name
         let availableVoices = [];
-        let maleVoiceData = null; 
-        let femaleVoiceData = null; 
+        let maleVoiceActual = null; // The actual Voice object for the male role
+        let femaleVoiceActual = null; // The actual Voice object for the female role
         let voiceRetryInterval = null; 
 
 
@@ -226,31 +224,36 @@
         const voiceSelect = document.getElementById('voice-select');
 
 
-        // --- VOICE SETUP (UNCHANGED) ---
+        // --- VOICE SETUP (FINAL ROBUST VERSION) ---
         const synth = window.speechSynthesis;
         let lastSpokenText = '';
 
-        function findVoice(voices, gender, excludeVoiceName = null) {
-            const enVoices = voices.filter(v => v.lang.startsWith('en') && v.name !== excludeVoiceName);
-            const lowQualityKeywords = ['compact', 'chrome', 'eloquence'];
-            const genderKeywords = gender === 'male' 
-                ? ['male', 'mark', 'daniel', 'david', 'lee', 'zack', 'scott'] 
-                : ['female', 'samantha', 'serena', 'zira', 'fiona', 'tara', 'ava', 'woman'];
+        /**
+         * Finds distinct voices by trying to match common gender keywords.
+         */
+        function findVoices(voices) {
+            const enVoices = voices.filter(v => v.lang.startsWith('en'));
+            
+            let maleV = enVoices.find(v => v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('david') || v.name.toLowerCase().includes('daniel'));
+            let femaleV = enVoices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('zira'));
 
-            let voice = enVoices.find(v => 
-                genderKeywords.some(key => v.name.toLowerCase().includes(key)) && 
-                !lowQualityKeywords.some(key => v.name.toLowerCase().includes(key))
-            );
+            // Fallbacks: take the first two unique English voices found
+            if (!maleV && enVoices.length >= 1) {
+                maleV = enVoices[0];
+            }
+            if (!femaleV && enVoices.length >= 2) {
+                femaleV = enVoices.find(v => v.name !== maleV.name);
+            }
+            if (!femaleV) {
+                femaleV = maleV;
+            }
 
-            if (!voice) {
-                voice = enVoices.find(v => genderKeywords.some(key => v.name.toLowerCase().includes(key)));
-            }
-            if (!voice && enVoices.length > 0) {
-                 voice = enVoices[0];
-            }
-            return voice;
+            return { maleV, femaleV };
         }
 
+        /**
+         * Populates the voice list using the two found English voices.
+         */
         function populateVoiceList() {
             availableVoices = synth.getVoices();
             
@@ -265,35 +268,35 @@
 
             voiceSelect.innerHTML = ''; 
 
-            maleVoiceData = findVoice(availableVoices, 'male');
-            femaleVoiceData = findVoice(availableVoices, 'female', maleVoiceData ? maleVoiceData.name : null);
+            const { maleV, femaleV } = findVoices(availableVoices);
 
-            if (!maleVoiceData) {
+            if (!maleV) {
                  voiceSelect.innerHTML = '<option value="default" disabled>No English Voices Found</option>';
                  return;
             }
 
-            const maleOption = document.createElement('option');
-            maleOption.value = maleVoiceData.name; 
-            maleOption.textContent = `Male Voice: ${maleVoiceData.name}`;
-            voiceSelect.appendChild(maleOption);
-            selectedVoice = maleVoiceData;
-
-            if (femaleVoiceData && femaleVoiceData.name !== maleVoiceData.name) {
-                const femaleOption = document.createElement('option');
-                femaleOption.value = femaleVoiceData.name;
-                femaleOption.textContent = `Female Voice: ${femaleVoiceData.name}`;
-                voiceSelect.appendChild(femaleOption);
-            } else {
-                 const fallbackOption = document.createElement('option');
-                 fallbackOption.value = maleVoiceData.name; 
-                 fallbackOption.textContent = `Female Voice (Note: Using ${maleVoiceData.name})`;
-                 voiceSelect.appendChild(fallbackOption);
-            }
+            // Store the actual Voice objects for use in speak()
+            maleVoiceActual = maleV;
+            femaleVoiceActual = femaleV;
             
-            voiceSelect.value = selectedVoice.name;
+            // --- 1. Add Male Voice Option ---
+            const maleOption = document.createElement('option');
+            // Use simple distinguishable string values for selection
+            maleOption.value = 'Male'; 
+            maleOption.textContent = `Male Voice (${maleV.name.split(' ').slice(0, 2).join(' ')})`;
+            voiceSelect.appendChild(maleOption);
+            selectedVoiceName = 'Male'; // Set default selection
+
+            // --- 2. Add Female Voice Option ---
+            const femaleOption = document.createElement('option');
+            femaleOption.value = 'Female';
+            femaleOption.textContent = `Female Voice (${femaleV.name.split(' ').slice(0, 2).join(' ')})`;
+            voiceSelect.appendChild(femaleOption);
+            
+            voiceSelect.value = selectedVoiceName;
         }
 
+        // --- VOICE INITIALIZATION (ROBUST RETRY) ---
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = populateVoiceList;
         } 
@@ -303,18 +306,33 @@
         }
 
         voiceSelect.addEventListener('change', () => {
-            const voiceName = voiceSelect.value;
-            selectedVoice = availableVoices.find(v => v.name === voiceName);
+            selectedVoiceName = voiceSelect.value;
         });
 
+        /**
+         * Speaks the text, using the actual voice object AND applying pitch/rate.
+         */
         function speak(text) {
-            if (synth.speaking || text === lastSpokenText || !selectedVoice) return;
+            if (synth.speaking || text === lastSpokenText || !selectedVoiceName) return;
             isSpeaking = true;
             
             const utterThis = new SpeechSynthesisUtterance(text);
-            utterThis.pitch = 1.0;
-            utterThis.rate = 0.88; 
-            utterThis.voice = selectedVoice; 
+            
+            if (selectedVoiceName === 'Female') {
+                // Apply female characteristics
+                utterThis.pitch = 1.2; 
+                utterThis.rate = 0.95; 
+                if (femaleVoiceActual) {
+                    utterThis.voice = femaleVoiceActual;
+                }
+            } else { // Male (default)
+                // Apply male characteristics
+                utterThis.pitch = 0.8; 
+                utterThis.rate = 0.8;  
+                if (maleVoiceActual) {
+                    utterThis.voice = maleVoiceActual;
+                }
+            }
             
             utterThis.onend = () => {
                 isSpeaking = false;
@@ -381,7 +399,7 @@
             return 'Unclear';
         }
 
-        // --- MEDIAPIPE HANDLER (MODIFIED FOR TIME-BASED CONFIRMATION) ---
+        // --- MEDIAPIPE HANDLER (TIME-BASED CONFIRMATION LOGIC - UNCHANGED) ---
 
         function onResults(results) {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -390,22 +408,18 @@
                 
                 const newSign = getSignFromLandmarks(handLandmarks);
                 
-                // 1. STABILITY CHECK: Is the sign new or stable?
                 if (newSign !== 'Unclear' && newSign === lastStableSign) {
                     if (!stabilityTimer) {
-                        // Start timer to make sign 'recognized' after STABILITY_HOLD_TIME
                         stabilityTimer = setTimeout(() => {
                             recognizedSign = newSign;
                             signEl.innerText = recognizedSign;
                             signEl.className = 'recognized';
                             
-                            // 2. SPEAKING CHECK: If recognized, start timer to speak after SPEAK_CONFIRM_TIME
                             if (!speakTimer && !isSpeaking) {
                                 speakTimer = setTimeout(() => {
                                     outputEl.innerText = `Speaking: ${recognizedSign}...`;
                                     speak(recognizedSign);
                                     
-                                    // Reset after speaking
                                     recognizedSign = 'Unclear';
                                     lastStableSign = 'Unclear';
                                     signEl.innerText = 'Spoken';
@@ -416,7 +430,6 @@
                         }, STABILITY_HOLD_TIME);
                     }
                 } else {
-                    // Sign changed or became unclear: Reset both timers
                     clearTimeout(stabilityTimer);
                     clearTimeout(speakTimer);
                     stabilityTimer = null;
@@ -435,7 +448,6 @@
                 statusEl.className = 'recognized';
 
             } else {
-                // Hand disappeared: Reset all states and timers
                 clearTimeout(stabilityTimer);
                 clearTimeout(speakTimer);
                 stabilityTimer = null;
@@ -618,7 +630,6 @@
                 targetR = 1.0 - confidenceLevel;
                 targetG = confidenceLevel;
                 targetB = 0.2 + confidenceLevel * 0.8;
-                // No pinch check needed here, just animate based on presence/confidence
                 expansionFactor = 1.2; 
                 morphSpeed = 0.1;
             } else {
