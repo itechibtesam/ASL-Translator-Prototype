@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ASL Translator Prototype - Final Mobile Fix</title>
+    <title>ASL Translator Prototype - Final Mobile Fix: Voice Loading</title>
     
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
@@ -215,6 +215,7 @@
         let availableVoices = [];
         let maleVoiceData = null; 
         let femaleVoiceData = null; 
+        let voiceRetryInterval = null; // New variable for the retry loop
 
 
         // --- DOM Elements ---
@@ -224,10 +225,13 @@
         const voiceSelect = document.getElementById('voice-select');
 
 
-        // --- VOICE SETUP (UNCHANGED) ---
+        // --- VOICE SETUP ---
         const synth = window.speechSynthesis;
         let lastSpokenText = '';
 
+        /**
+         * Finds a distinct English voice prioritizing common male/female names. (UNCHANGED)
+         */
         function findVoice(voices, gender, excludeVoiceName = null) {
             const enVoices = voices.filter(v => 
                 v.lang.startsWith('en') && 
@@ -235,6 +239,7 @@
             );
             
             const lowQualityKeywords = ['compact', 'chrome', 'eloquence'];
+            
             const genderKeywords = gender === 'male' 
                 ? ['male', 'mark', 'daniel', 'david', 'lee', 'zack', 'scott'] 
                 : ['female', 'samantha', 'serena', 'zira', 'fiona', 'tara', 'ava', 'woman'];
@@ -255,14 +260,29 @@
             return voice;
         }
 
-
+        /**
+         * Populates the voice list and sets up the retry logic.
+         */
         function populateVoiceList() {
             availableVoices = synth.getVoices();
+            
+            // If voices are available, proceed and clear the retry interval
+            if (availableVoices.length > 0) {
+                 if (voiceRetryInterval) {
+                     clearInterval(voiceRetryInterval);
+                     voiceRetryInterval = null;
+                 }
+            } else {
+                // If no voices yet, return and let the retry loop handle it
+                return; 
+            }
+
             voiceSelect.innerHTML = ''; 
 
             maleVoiceData = findVoice(availableVoices, 'male');
             femaleVoiceData = findVoice(availableVoices, 'female', maleVoiceData ? maleVoiceData.name : null);
 
+            // Fallback logic for unique voices (UNCHANGED)
             if (!maleVoiceData && availableVoices.filter(v => v.lang.startsWith('en')).length >= 1) {
                 maleVoiceData = availableVoices.filter(v => v.lang.startsWith('en'))[0];
             }
@@ -300,10 +320,17 @@
             voiceSelect.value = selectedVoice.name;
         }
 
+        // --- VOICE INITIALIZATION (ROBUST RETRY) ---
+
+        // 1. Listen for the official event (best case)
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = populateVoiceList;
-        } else {
-            populateVoiceList(); 
+        } 
+        
+        // 2. Start the aggressive retry loop (mobile fix)
+        // This repeatedly calls populateVoiceList until it finds voices.
+        if (synth.getVoices().length === 0) {
+            voiceRetryInterval = setInterval(populateVoiceList, 500);
         }
 
         voiceSelect.addEventListener('change', () => {
@@ -327,7 +354,7 @@
             synth.speak(utterThis);
         }
 
-        // --- GEOMETRY UTILITIES (UNCHANGED) ---
+        // --- ALL OTHER LOGIC (UNCHANGED) ---
 
         function distance(lm1, lm2) {
             return Math.sqrt(
@@ -343,8 +370,6 @@
             return tip.y < mcp.y - 0.05;
         }
 
-        // --- SIGN RECOGNITION LOGIC (UNCHANGED) ---
-
         function getSignFromLandmarks(landmarks) {
             const isThumbOpen = isFingerExtended(landmarks, L_THUMB_TIP);
             const isIndexOpen = isFingerExtended(landmarks, L_INDEX_TIP);
@@ -352,28 +377,24 @@
             const isRingOpen = isFingerExtended(landmarks, L_RING_TIP);
             const isPinkyOpen = isFingerExtended(landmarks, L_PINKY_TIP);
             
-            // 1. Hello (Open Hand)
             if (isThumbOpen && isIndexOpen && isMiddleOpen && isRingOpen && isPinkyOpen) {
                 confidenceLevel = 0.9;
                 currentShapeTarget = 'sphere';
                 return 'Hello';
             }
 
-            // 2. I Love You (ILY - Index, Pinky, Thumb extended)
             if (isIndexOpen && isPinkyOpen && isThumbOpen && !isMiddleOpen && !isRingOpen) {
                 confidenceLevel = 0.8;
                 currentShapeTarget = 'heart';
                 return 'I Love You ';
             }
             
-            // 3. No / Fist (All fingers curled)
             if (!isThumbOpen && !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
                 confidenceLevel = 0.7;
                 currentShapeTarget = 'small_sphere';
                 return 'No';
             }
 
-            // 4. Index Finger (Request/Help - Index extended only)
             if (isIndexOpen && !isThumbOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
                 confidenceLevel = 0.85;
                 currentShapeTarget = 'saturn';
@@ -384,8 +405,6 @@
             currentShapeTarget = 'chaos';
             return 'Unclear';
         }
-
-        // --- MEDIAPIPE HANDLER (UNCHANGED) ---
 
         function onResults(results) {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -438,11 +457,12 @@
             }
         }
 
-        // --- MEDIAPIPE SETUP (Mobile Optimized) ---
+        // --- MEDIAPIPE & CAMERA SETUP (UNCHANGED from last robust version) ---
+
         const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
         hands.setOptions({ 
             maxNumHands: 1, 
-            modelComplexity: 0, // CRITICAL: Reduced for mobile performance
+            modelComplexity: 0, 
             minDetectionConfidence: 0.5, 
             minTrackingConfidence: 0.5 
         });
@@ -450,8 +470,6 @@
 
         const videoElement = document.getElementById('input_video');
         
-        // --- MOBILE-READY CAMERA SETUP ---
-        // Wrap the camera start in a timeout to ensure all components are initialized, which helps with mobile browsers
         setTimeout(() => {
             try {
                 const cameraUtils = new Camera(videoElement, {
@@ -463,15 +481,13 @@
                 cameraUtils.start();
                 statusEl.innerText = 'Camera Initialized';
             } catch (error) {
-                // This catches camera permission issues, which often happen on mobile
                 console.error("Camera startup failed:", error);
                 statusEl.innerText = 'ERROR: Check Camera Permissions';
                 statusEl.className = 'unclear';
             }
-        }, 500); // 500ms delay to help initialization on slower devices
+        }, 500); 
 
-
-        // --- THREE.JS SETUP AND ANIMATION (UNCHANGED) ---
+        // --- THREE.JS & ANIMATION (UNCHANGED) ---
         
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x000000, 0.002);
@@ -482,7 +498,6 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         document.body.appendChild(renderer.domElement);
 
-        // Particle Data
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(PARTICLE_COUNT * 3);
         const targets = new Float32Array(PARTICLE_COUNT * 3);
@@ -528,7 +543,6 @@
         const particles = new THREE.Points(geometry, material);
         scene.add(particles);
 
-        // --- SHAPE GENERATORS (UNCHANGED) ---
         function setTargetShape(shapeType) {
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 const idx = i * 3;
@@ -580,7 +594,6 @@
         }
         setTargetShape(currentShapeTarget);
 
-        // --- ANIMATION LOOP (UNCHANGED) ---
         const clock = new THREE.Clock();
         let lastShape = currentShapeTarget;
 
@@ -620,7 +633,6 @@
                 particles.position.y = 0;
             }
 
-            // Morphing and Color Update
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 const idx = i * 3;
 
@@ -646,7 +658,6 @@
 
         animate();
 
-        // --- MOBILE-FRIENDLY RESIZE HANDLER (UNCHANGED) ---
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
