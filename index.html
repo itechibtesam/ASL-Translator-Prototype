@@ -2,21 +2,20 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ASL Translator Prototype - Mobile Ready</title>
+    <title>ASL Translator Prototype - Final Mobile Fix</title>
     
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     
     <style>
-        /* 1. Global & Background (Updated for Mobile Viewport) */
+        /* 1. Global & Background */
         body {
             margin: 0;
             overflow: hidden;
             background: #000000;
             font-family: 'Poppins', sans-serif;
             color: #E0E0E0;
-            /* Ensures full coverage on mobile */
             width: 100vw; 
             height: 100vh;
         }
@@ -32,14 +31,14 @@
             left: 0;
         }
 
-        /* 2. GUI Panel (Centralized Frosted Glass - Adjusted for smaller screens) */
+        /* 2. GUI Panel (Centralized Frosted Glass) */
         #gui {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 90%; /* Use percentage for mobile responsiveness */
-            max-width: 400px; /* Max width constraint */
+            width: 90%; 
+            max-width: 400px; 
             z-index: 100;
             padding: 30px;
             border-radius: 20px; 
@@ -48,7 +47,6 @@
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); 
             backdrop-filter: blur(10px); 
             -webkit-backdrop-filter: blur(10px);
-            /* Allows touch events to pass through to elements like the dropdown, but not the background */
             pointer-events: none; 
         }
         
@@ -58,7 +56,7 @@
         }
 
         h3 {
-            font-size: 1.6em; /* Slightly smaller for mobile */
+            font-size: 1.6em; 
             font-weight: 700; 
             color: #4CAF50;
             margin-top: 0;
@@ -113,7 +111,7 @@
 
         /* 4. Primary Output Text */
         #output-text {
-            font-size: 1.8em; /* Slightly smaller for mobile */
+            font-size: 1.8em; 
             font-weight: 700;
             color: #00FFFF;
             text-align: center;
@@ -226,13 +224,10 @@
         const voiceSelect = document.getElementById('voice-select');
 
 
-        // --- VOICE SETUP ---
+        // --- VOICE SETUP (UNCHANGED) ---
         const synth = window.speechSynthesis;
         let lastSpokenText = '';
 
-        /**
-         * Finds a distinct English voice prioritizing common male/female names.
-         */
         function findVoice(voices, gender, excludeVoiceName = null) {
             const enVoices = voices.filter(v => 
                 v.lang.startsWith('en') && 
@@ -240,24 +235,19 @@
             );
             
             const lowQualityKeywords = ['compact', 'chrome', 'eloquence'];
-            
-            // Common high-quality names for gender distinction (Mac/Windows/Google)
             const genderKeywords = gender === 'male' 
                 ? ['male', 'mark', 'daniel', 'david', 'lee', 'zack', 'scott'] 
                 : ['female', 'samantha', 'serena', 'zira', 'fiona', 'tara', 'ava', 'woman'];
 
-            // 1. Prioritize names matching gender keywords, excluding low quality/compact versions
             let voice = enVoices.find(v => 
                 genderKeywords.some(key => v.name.toLowerCase().includes(key)) && 
                 !lowQualityKeywords.some(key => v.name.toLowerCase().includes(key))
             );
 
-            // 2. Fallback to any voice with the gender keyword (e.g., "Google US English Male")
             if (!voice) {
                 voice = enVoices.find(v => genderKeywords.some(key => v.name.toLowerCase().includes(key)));
             }
             
-            // 3. Last resort: just pick the first available voice that hasn't been used
             if (!voice && enVoices.length > 0) {
                  voice = enVoices[0];
             }
@@ -270,13 +260,9 @@
             availableVoices = synth.getVoices();
             voiceSelect.innerHTML = ''; 
 
-            // 1. Find the best Male voice
             maleVoiceData = findVoice(availableVoices, 'male');
-            
-            // 2. Find the best Female voice, excluding the Male voice name
             femaleVoiceData = findVoice(availableVoices, 'female', maleVoiceData ? maleVoiceData.name : null);
 
-            // FALLBACK: If we couldn't find distinct names, force the selection of the first two available unique English voices
             if (!maleVoiceData && availableVoices.filter(v => v.lang.startsWith('en')).length >= 1) {
                 maleVoiceData = availableVoices.filter(v => v.lang.startsWith('en'))[0];
             }
@@ -296,7 +282,6 @@
             maleOption.textContent = `Male Voice: ${maleVoiceData.name}`;
             voiceSelect.appendChild(maleOption);
             
-            // Set male as default
             selectedVoice = maleVoiceData;
 
             // --- 2. Add Female Voice Option ---
@@ -306,18 +291,15 @@
                 femaleOption.textContent = `Female Voice: ${femaleVoiceData.name}`;
                 voiceSelect.appendChild(femaleOption);
             } else {
-                 // Fallback if only one distinct voice could be found
                  const fallbackOption = document.createElement('option');
                  fallbackOption.value = maleVoiceData.name; 
                  fallbackOption.textContent = `Female Voice (Note: Using ${maleVoiceData.name})`;
                  voiceSelect.appendChild(fallbackOption);
             }
             
-            // Set the dropdown value to the default voice
             voiceSelect.value = selectedVoice.name;
         }
 
-        // Event handler for when voices are ready (critical for Chrome)
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = populateVoiceList;
         } else {
@@ -335,7 +317,7 @@
             
             const utterThis = new SpeechSynthesisUtterance(text);
             utterThis.pitch = 1.0;
-            utterThis.rate = 0.88; // Slightly slower for a more natural delivery
+            utterThis.rate = 0.88; 
             utterThis.voice = selectedVoice; 
             
             utterThis.onend = () => {
@@ -456,21 +438,37 @@
             }
         }
 
+        // --- MEDIAPIPE SETUP (Mobile Optimized) ---
         const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        hands.setOptions({ 
+            maxNumHands: 1, 
+            modelComplexity: 0, // CRITICAL: Reduced for mobile performance
+            minDetectionConfidence: 0.5, 
+            minTrackingConfidence: 0.5 
+        });
         hands.onResults(onResults);
 
         const videoElement = document.getElementById('input_video');
         
         // --- MOBILE-READY CAMERA SETUP ---
-        const cameraUtils = new Camera(videoElement, {
-            onFrame: async () => { await hands.send({image: videoElement}); },
-            width: CAM_WIDTH, 
-            height: CAM_HEIGHT,
-            // Use environment camera on mobile by default
-            facingMode: 'user' 
-        });
-        cameraUtils.start();
+        // Wrap the camera start in a timeout to ensure all components are initialized, which helps with mobile browsers
+        setTimeout(() => {
+            try {
+                const cameraUtils = new Camera(videoElement, {
+                    onFrame: async () => { await hands.send({image: videoElement}); },
+                    width: CAM_WIDTH, 
+                    height: CAM_HEIGHT,
+                    facingMode: 'user' 
+                });
+                cameraUtils.start();
+                statusEl.innerText = 'Camera Initialized';
+            } catch (error) {
+                // This catches camera permission issues, which often happen on mobile
+                console.error("Camera startup failed:", error);
+                statusEl.innerText = 'ERROR: Check Camera Permissions';
+                statusEl.className = 'unclear';
+            }
+        }, 500); // 500ms delay to help initialization on slower devices
 
 
         // --- THREE.JS SETUP AND ANIMATION (UNCHANGED) ---
@@ -648,7 +646,7 @@
 
         animate();
 
-        // --- MOBILE-FRIENDLY RESIZE HANDLER ---
+        // --- MOBILE-FRIENDLY RESIZE HANDLER (UNCHANGED) ---
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
